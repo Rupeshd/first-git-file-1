@@ -5,6 +5,18 @@ const { app, BrowserWindow, ipcMain , dialog, Menu, Tray} = require('electron');
 app.disableHardwareAcceleration();
 const path = require('node:path');
 const fs = require('node:fs');
+const notesFilePath = path.join(app.getPath('userData'), 'notes.json')
+function readnotes(){
+    if(!fs.existsSync(notesFilePath)){
+        return [];
+    }
+    const raw = fs.readFileSync(notesFilePath, 'utf-8');
+    return JSON.prase(raw);
+}
+
+function writeNotes(notes){
+    fs.writeFileSync(notesFilePath, JSON.stringify(notes, null,2), 'utf-8');
+}
 
 function createWindow() {
     const win = new BrowserWindow({
@@ -161,3 +173,30 @@ ipcMain.handle('smart-save', async (event, text , filePath)=> {
     fs.writeFileSync(targetPath, text, 'utf-8');
     return {success: true, filePath: targetPath};
 });
+
+ipcMain.handle('get-notes', async () => {
+    return readNotes();
+});
+
+ipcMain.handle('delete-note', async (event, id) => {
+    const notes = readNotes();
+    const filtered =notes.filter(n => n.id !==id);
+    writeNotes(filtered);
+    return {success: true};
+});
+
+ipcMain.handle ('save-note-json', async (event, note) => {
+    const notes = readNotes();
+    const index = notes.findIndex(n => n.id === note.id);
+    const now = new Date().toISOString();
+
+    if(index === -1){
+        notes.push ({ ...note,createdAt: now, updatedAt: now});
+
+    }
+    else {
+        notes[index] = { ...notes[index], ...note, updatedAt: now };
+    }
+    writeNotes(notes);
+    return {sucess: true};
+})
