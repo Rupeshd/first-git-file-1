@@ -1,1 +1,5 @@
 
+(node:6632) UnhandledPromiseRejectionWarning: ReferenceError: window is not defined
+    at C:\Users\user-6\Rupesh for Software enginering\clone\first-git-file-1\main.js:76:39
+(Use `electron --trace-warnings ...` to show where the warning was created)
+(node:6632) UnhandledPromiseRejectionWarning: Unhandled promise rejection. This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). To terminate the node process on unhandled promise rejection, use the CLI flag `--unhandled-rejections=strict` (see https://nodejs.org/api/cli.html#cli_unhandled_rejections_mode). (rejection id: 1)

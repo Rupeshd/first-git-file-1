@@ -7,7 +7,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { callbackify } = require('node:util');
 const { permission } = require('node:process');
-const notesFilePath = path.join(app.getPath('userData'), 'notes.json')
+const notesFilePath = path.join(app.getPath('userData'), 'notes.json');
 function readNotes(){
     if(!fs.existsSync(notesFilePath)){
         return [];
@@ -73,9 +73,14 @@ let tray = null;
 app.whenReady().then(()=>{
     createWindow();
 
-    session.defaultSession.setPermissionCheckHandler((webContents, premission, callback)=>{
-        if(permission === 'media') callback(true);
-        else callback(false);
+    console.log("SpeechRecognition:", window.SpeechRecognition);
+    console.log("webkitSpeechRecognition:", window.webkitSpeechRecognition);
+    session.defaultSession.setPermissionRequestHandler((webContents, premission, callback)=>{
+         if (permission === 'media') {
+            callback(true); // allow microphone
+        } else {
+            callback(false);
+        }
     })
     
     const menuTemplate =[
@@ -196,8 +201,7 @@ ipcMain.handle('open-file', async (event)=> {
     const result = await dialog.showOpenDialog({
         properties: ['openFile'],
         filters :[
-            {name: 'Text Files', extensions: ['txt', 'md', 'log', 'csv']},
-            {name: 'All Files', extensions: ['*']}
+            {name: 'Text Files', extensions: ['txt']},
         ]
     });
     if(result.canceled){
