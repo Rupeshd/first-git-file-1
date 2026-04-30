@@ -7,13 +7,15 @@ window.addEventListener('DOMContentLoaded', async () => {
         textarea.value = savedNote;
 
         let lastSavedText=textarea.value;
+        let currentFilePath = null;
 
     saveBtn.addEventListener('click', async () => {
             try{
-                await window.electronAPI.saveNote(textarea.value);
+                const result = await window.electronAPI.smartSave(textarea.value, currentFilePath);
                 lastSavedText = textarea.value;
-                alert('Note saved successfully!');
-                if(statusEl) statusEl.textContent = 'Manually saved!';
+                currentFilePath=result.filePath;
+                window.electronAPI.setUnsavedChanges(false);
+                if(statusEl) statusEl.textContent = 'Note saved successfully!';
             }catch(err){
                 console.error('Manual save failed:',err);
                 if(statusEl) statusEl.textContent = 'Save failed - check console';
@@ -31,6 +33,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         try{
             await window.electronAPI.saveNote(currentText);
             lastSavedText = currentText;
+            window.electronAPI.setUnsavedChanges(false);
             const now = new Date().toLocaleTimeString();
             if (statusEl) statusEl.textContent = `Auto-saved at ${now}`;
         }catch (err){
@@ -41,6 +44,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     textarea.addEventListener('input',()=>{
         if(statusEl) statusEl.textContent = 'Changes detected - auto-save in 5s...';
+        const hasChanges = textarea.value !== lastSavedText;
+        window.electronAPI.setUnsavedChanges(hasChanges);
         clearTimeout(debouncerTimer);
         debouncerTimer = setTimeout(autoSave, 5000);
     });
@@ -50,9 +55,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         const result = await window.electronAPI.saveAs(textarea.value);
         if(result.success){
             lastSavedText = textarea.value;
-            statusEl.textContent = `Saved as ${result.filepath}`;
+            currentFilePath = result.filePath;
+            window.electronAPI.setUnsavedChanges(false);
+            statusEl.textContent = `Saved as ${result.filePath}`;
         }else{
-            statusEl.textContent='Save as canclled.';
+            statusEl.textContent='Save as cancelled.';
         }
     });
     const newNoteBtn = document.getElementById('new-note');
@@ -61,6 +68,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if(textarea.value === lastSavedText){
             textarea.value = '';
             lastSavedText = '';
+            window.electronAPI.setUnsavedChanges(false);
             statusEl.textContent = 'New note started.';
             return;
         }
@@ -69,6 +77,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if(result.confirmed){
             textarea.value='';
             lastSavedText='';
+            window.electronAPI.setUnsavedChanges(false);
             statusEl.textContent = 'New note started';
         }else{
             statusEl.textContent = 'New note cancelled.';
@@ -83,23 +92,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             textarea.value = result.content;
             lastSavedText = result.content;
             currentFilePath = result.filePath;
-            statusEl.textContent = `Opened ${result.filepath}`;
+            window.electronAPI.setUnsavedChanges(false);
+            statusEl.textContent = `Opened ${result.filePath}`;
         }else{
             statusEl.textContent = 'Open file cancelled.';
-        }
-    });
-
-    saveAsBtn.addEventListener('click', async () =>{
-        try{
-            const result = await window.electronAPI.smartSave(textarea.value, currentFilePath);
-            lastSavedText = textarea.value;
-            currentFilePath = result.filePath;
-            statusEl.textContent = `save to: ${result.filePath}`;
-
-        }catch (err){
-            console.error('save failed: ', err);
-            statusEl.textContent = 'save failed';
-
         }
     });
     
@@ -116,4 +112,66 @@ window.addEventListener('DOMContentLoaded', async () => {
         saveAsBtn.click();
     });
 
+    const micBtn = document.getElementById('mic-btn');
+    const SpeechRecognitioin = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    let recognition;
+    if(SpeechRecognitioin){
+        recognition = new SpeechRecognitioin();
+        recognition.continous = true;
+        recognition.inrerimResults = true;
+
+        recognition.lang='en-US';
+
+        recognition.onstart = () => {
+            statusEl.textContent = '🎤 Microphone active...';
+            micBtn.style.backgroundColor = 'red';
+        };
+
+        recognition.onspeechstart = () => {
+            statusEl.textContent = '🗣️ Listening...';
+        };
+
+        recognition.onspeechend = () => {
+            statusEl.textContent = '🤫 Waiting for speech...';
+        };
+
+        recognition.onend = () => {
+            statusEl.textContent = '🛑 Recording stopped';
+            micBtn.textContent = 'Start 🎤';
+            micBtn.style.backgroundColor = '';
+            isListening = false;
+        };
+
+        recognition.onresult = (event) =>{
+            let transcript =''
+
+            for (let i=event.resultIndex; i< event.results.length; i++){
+                if (event.results[i].isFinal){
+                    transcript += event.result[i][0].transcript;
+                }
+            }
+            if (transcript){
+                textarea.value += transcript;
+
+                textarea.dispatchEvent(new Event('input'));
+            }
+        };
+        recognition.onerror = (e) =>{
+            console.error('speech error: ', e);
+        };
+    }
+    micBtn.addEventListener('click', () => {
+        if(!recognition) return;
+        
+        if(!isListening){
+            recognition.start();
+            micBtn.textContent = 'Stop 🎙️';
+            isListening=true;
+        }else {
+            recognition.stop();
+            micBtn.textContent = 'Start 🎤';
+            isListening = false;
+        }
+    });
 });

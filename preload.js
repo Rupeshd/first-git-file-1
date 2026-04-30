@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld('electronAPI',{
     onMenuAction: (Channel, callback) => ipcRenderer.on(Channel,callback),
     getNotes: () => ipcRenderer.invoke('get-notes'),
     saveNotesjson: (note) => ipcRenderer.invoke('save-note-json', note),
-    deleteNote: (id) => ipcRenderer.invoke('delete-note',id)    
+    deleteNote: (id) => ipcRenderer.invoke('delete-note',id),
+    setUnsavedChanges: (unsaved) => ipcRenderer.invoke('set-unsaved-changes', unsaved)
 }); 
