@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain , dialog, Menu, Tray, session, webContents} = require('electron');
+const { app, BrowserWindow, ipcMain , dialog, Menu, Tray} = require('electron');
 
 
 
@@ -7,6 +7,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { callbackify } = require('node:util');
 const { permission } = require('node:process');
+const { create } = require('node:domain');
 const notesFilePath = path.join(app.getPath('userData'), 'notes.json');
 function readNotes(){
     if(!fs.existsSync(notesFilePath)){
@@ -32,57 +33,26 @@ function createWindow() {
     });
 
     win.loadFile('index.html');
+    win.on('close', (event)=>{
+        event.preventDefault();
+        win.hide();
+    });
     let hasUnsavedChanges = false;
     
     ipcMain.handle('set-unsaved-changes', (event, unsaved) => {
         hasUnsavedChanges = unsaved;
     });
     
-    win.on('close', (event)=>{
-        if(hasUnsavedChanges){
-            const response = dialog.showMessageBoxSync(win, {
-                type: 'warning',
-                title: 'Unsaved Changes',
-                message: 'You have unsaved changes. Do you want to save before closing?',
-                buttons: ['Save', 'Don\'t Save', 'Cancel'],
-                defaultId: 0,
-                cancelId: 2
-            });
-            
-            if(response === 0){
-                // User clicked Save - send save signal and wait
-                win.webContents.send('menu-save');
-                event.preventDefault();
-                return;
-            } else if(response === 2){
-                // User clicked Cancel
-                event.preventDefault();
-                return;
-            }
-            // response === 1 means Don't Save, allow close to proceed
-        }
-        win.hide();
-    });
+    
 }
 
 app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
-let tray = null;
-app.whenReady().then(()=>{
-    createWindow();
 
-    console.log("SpeechRecognition:", window.SpeechRecognition);
-    console.log("webkitSpeechRecognition:", window.webkitSpeechRecognition);
-    session.defaultSession.setPermissionRequestHandler((webContents, premission, callback)=>{
-         if (permission === 'media') {
-            callback(true); // allow microphone
-        } else {
-            callback(false);
-        }
-    })
-    
+app.whenReady().then(()=>{
+    createWindow();    
     const menuTemplate =[
         {
             label: 'File',
@@ -123,21 +93,23 @@ app.whenReady().then(()=>{
         ]
         }
     ]
+
     const menu = Menu.buildFromTemplate(menuTemplate);
     Menu.setApplicationMenu(menu);
+    let tray = null;
     tray = new Tray(path.join(__dirname, 'Icon.png'));
-    const trayMenu = Menu.buildFromTemplate([
-        {
-            label: 'Show App',
-            click: () =>{
-                BrowserWindow.getAllWindows()[0].show();
+        const trayMenu = Menu.buildFromTemplate([
+            {
+                label: 'Show App',
+                click: () =>{
+                    BrowserWindow.getAllWindows()[0].show();
+                }
+            },
+            {
+                label: 'Quit',
+                click: () => app.quit()
             }
-        },
-        {
-            label: 'Quit',
-            click: () => app.quit()
-        }
-    ]);
+        ]);
     tray.setToolTip('Quick Note Taker');
     tray.setContextMenu(trayMenu);
 
