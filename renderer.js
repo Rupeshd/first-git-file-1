@@ -30,8 +30,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         isDirty = true;
         window.electronAPI.setUnsavedChanges(true);
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(saveCurrentNote, 2000);
-        statusEl.textContent = 'Unsaved changes...';
+        debounceTimer = setTimeout(saveCurrentNote, 5000);
+        statusEl.textContent = `Unsaved changes`;
         statusEl.style.color = 'gray';
     }
 
@@ -132,7 +132,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
             markClean();
             renderNotesList();
-            setStatus('Saved \u2714');
+            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            setStatus(`Auto saved at ${now}`);
         } catch (err) {
             setStatus('Save failed \u2716', true);
             console.error('[saveCurrentNote] exception:', err);
