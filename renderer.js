@@ -9,68 +9,38 @@ window.addEventListener('DOMContentLoaded', async () => {
     const noteList    = document.getElementById('note-list');
     const statusEl    = document.getElementById('save_status');
 
-    let notes         = [];
-    let currentNoteId = null;
-    let debounceTimer = null;
-    let isDirty       = false;
-    let statusTimer   = null;
-
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
-    function setStatus(msg, isError = false) {
-        clearTimeout(statusTimer);
-        statusEl.textContent  = msg;
-        statusEl.style.color  = isError ? '#e05252' : 'gray';
-        if (msg) {
-            statusTimer = setTimeout(() => { statusEl.textContent = ''; }, 3000);
-        }
-    }
-
-    function markDirty() {
-        isDirty = true;
-        window.electronAPI.setUnsavedChanges(true);
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(saveCurrentNote, 5000);
-        statusEl.textContent = `Unsaved changes`;
-        statusEl.style.color = 'gray';
-    }
-
-    function markClean() {
-        isDirty = false;
-        window.electronAPI.setUnsavedChanges(false);
-    }
-
-    function escapeHtml(str) {
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
-    }
+    // State
+    let notes           = [];         // all notes loaded from JSON
+    let currentNoteId   = null;       // id of the note being edited
+    let lastSavedContent = '';        // tracks unsaved changes
+    let debounceTimer   = null;
 
     // ── Sidebar ────────────────────────────────────────────────────────────────
 
+    // NEW: Render the note list in the sidebar
     function renderNotesList() {
-        noteList.innerHTML = '';
+        noteList.innerHTML = ''; // clear existing list
 
         notes.forEach(note => {
             const item = document.createElement('div');
             item.className = 'note-item' + (note.id === currentNoteId ? ' active' : '');
 
             item.innerHTML = `
-                <button class="note-item-delete" title="Delete note">&#x2715;</button>
+                <button class="note-item-delete" data-id="${note.id}">\u00d7</button>
                 <div class="note-item-title">${escapeHtml(note.title || 'Untitled')}</div>
-                <div class="note-item-date">${new Date(note.updatedAt).toLocaleString()}</div>
+                <div class="note-item-date">${new Date(note.updatedAt).toLocaleDateString()}</div>
             `;
 
-            item.addEventListener('click', (e) => {
+            // Click note to open it
+            item.addEventListener('click', async (e) => {
                 if (e.target.classList.contains('note-item-delete')) return;
-                switchNote(note.id);
+                await switchNote(note.id);
             });
 
-            item.querySelector('.note-item-delete').addEventListener('click', (e) => {
+            // Delete button
+            item.querySelector('.note-item-delete').addEventListener('click', async (e) => {
                 e.stopPropagation();
-                deleteNote(note.id);
+                await deleteNote(note.id);
             });
 
             noteList.appendChild(item);
@@ -79,28 +49,32 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     // ── Switch note ────────────────────────────────────────────────────────────
 
+    // NEW: Switch to a different note (with unsaved changes warning)
     async function switchNote(id) {
-        // Cancel any pending auto-save for the previous note first
-        clearTimeout(debounceTimer);
+        // Check for unsaved changes first
+        if (textarea.value !== lastSavedContent) {
+            const result = await window.electronAPI.newNote();
+            if (!result.confirmed) return; // user cancelled – stay on current note
+        }
 
+        // Load the selected note
         const note = notes.find(n => n.id === id);
         if (!note) return;
 
-        currentNoteId    = id;
-        titleInput.value = note.title   || '';
-        textarea.value   = note.content || '';
+        currentNoteId        = note.id;
+        titleInput.value     = note.title   || '';
+        textarea.value       = note.content || '';
+        lastSavedContent     = note.content || '';
+        statusEl.textContent = '';
 
-        markClean();
-        renderNotesList();
+        renderNotesList(); // refresh sidebar to show active state
     }
 
     // ── Save ───────────────────────────────────────────────────────────────────
 
+    // NEW: Save the currently open note to JSON
     async function saveCurrentNote() {
-        if (!currentNoteId) {
-            setStatus('No note selected', true);
-            return;
-        }
+        if (!currentNoteId) return;
 
         clearTimeout(debounceTimer);
 
@@ -110,97 +84,47 @@ window.addEventListener('DOMContentLoaded', async () => {
             content: textarea.value
         };
 
-        try {
-            const result = await window.electronAPI.saveNoteJson(note);
+        const result = await window.electronAPI.saveNoteJson(note);
 
-            if (!result.success) {
-                setStatus('Save failed: ' + (result.error || 'unknown error'), true);
-                console.error('[saveCurrentNote] IPC returned failure:', result);
-                return;
-            }
-
-            // Keep in-memory list in sync so sidebar title updates immediately
-            const idx = notes.findIndex(n => n.id === currentNoteId);
-            if (idx !== -1) {
-                notes[idx] = {
-                    ...notes[idx],
-                    title:     note.title,
-                    content:   note.content,
-                    updatedAt: new Date().toISOString()
-                };
-            }
-
-            markClean();
-            renderNotesList();
-            const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            setStatus(`Auto saved at ${now}`);
-        } catch (err) {
-            setStatus('Save failed \u2716', true);
-            console.error('[saveCurrentNote] exception:', err);
+        if (!result.success) {
+            statusEl.textContent = 'Save failed \u2716';
+            statusEl.style.color = '#e05252';
+            return;
         }
+
+        lastSavedContent = textarea.value;
+
+        // Update the note in the local array too
+        const index = notes.findIndex(n => n.id === currentNoteId);
+        if (index !== -1) {
+            notes[index] = { ...notes[index], ...note, updatedAt: new Date().toISOString() };
+        }
+
+        renderNotesList();
+        statusEl.style.color  = 'gray';
+        statusEl.textContent  = `Saved at ${new Date().toLocaleTimeString()}`;
     }
 
     // ── Delete ─────────────────────────────────────────────────────────────────
 
+    // NEW: Delete a note
     async function deleteNote(id) {
-        if (!confirm('Delete this note?')) return;
+        const result = await window.electronAPI.newNote(); // reuse warning dialog
+        if (!result.confirmed) return;
 
-        try {
-            const result = await window.electronAPI.deleteNote(id);
-            if (!result.success) {
-                setStatus('Delete failed', true);
-                return;
-            }
+        await window.electronAPI.deleteNote(id);
+        notes = notes.filter(n => n.id !== id);
 
-            notes = notes.filter(n => n.id !== id);
-
-            if (currentNoteId === id) {
-                currentNoteId    = null;
-                textarea.value   = '';
-                titleInput.value = '';
-                markClean();
-            }
-
-            if (notes.length > 0 && !currentNoteId) {
-                await switchNote(notes[0].id);
-            } else {
-                renderNotesList();
-            }
-        } catch (err) {
-            setStatus('Delete failed \u2716', true);
-            console.error('[deleteNote] exception:', err);
+        // If we deleted the current note, clear the editor
+        if (currentNoteId === id) {
+            currentNoteId        = null;
+            titleInput.value     = '';
+            textarea.value       = '';
+            lastSavedContent     = '';
+            statusEl.textContent = 'Note deleted.';
         }
-    }
 
-    // ── New note ───────────────────────────────────────────────────────────────
-
-    async function createNewNote() {
-        const { confirmed } = await window.electronAPI.newNote();
-        if (!confirmed) return;
-
-        const now = new Date().toISOString();
-        const newNote = {
-            id:        Date.now().toString(),
-            title:     'Untitled',
-            content:   '',
-            createdAt: now,
-            updatedAt: now
-        };
-
-        try {
-            const result = await window.electronAPI.saveNoteJson(newNote);
-            if (!result.success) {
-                setStatus('Could not create note \u2716', true);
-                return;
-            }
-            notes.unshift(newNote);
-            await switchNote(newNote.id);
-            titleInput.focus();
-            titleInput.select();
-        } catch (err) {
-            setStatus('Could not create note \u2716', true);
-            console.error('[createNewNote] exception:', err);
-        }
+        renderNotesList();
     }
 
     // ── Export ─────────────────────────────────────────────────────────────────
@@ -211,7 +135,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const text    = `${title}\n${divider}\n\n${textarea.value}`;
 
         const result = await window.electronAPI.saveAs(text);
-        if (result.success) setStatus('Exported \u2714');
+        if (result.success) statusEl.textContent = 'Exported \u2714';
     }
 
     // ── Import ─────────────────────────────────────────────────────────────────
@@ -229,49 +153,90 @@ window.addEventListener('DOMContentLoaded', async () => {
             updatedAt: now
         };
 
-        try {
-            const saveResult = await window.electronAPI.saveNoteJson(imported);
-            if (!saveResult.success) {
-                setStatus('Import failed \u2716', true);
-                return;
-            }
-            notes.unshift(imported);
-            await switchNote(imported.id);
-            setStatus('Imported \u2714');
-        } catch (err) {
-            setStatus('Import failed \u2716', true);
-            console.error('[importFile] exception:', err);
+        const saveResult = await window.electronAPI.saveNoteJson(imported);
+        if (!saveResult.success) {
+            statusEl.textContent = 'Import failed \u2716';
+            statusEl.style.color = '#e05252';
+            return;
         }
+
+        notes.unshift(imported);
+        await switchNote(imported.id);
+        statusEl.textContent = 'Imported \u2714';
     }
 
     // ── Event listeners ────────────────────────────────────────────────────────
 
-    newNoteBtn.addEventListener('click',  createNewNote);
-    saveBtn.addEventListener('click',     saveCurrentNote);
+    // UPDATED: New Note button – creates a new note in JSON storage
+    newNoteBtn.addEventListener('click', async () => {
+        if (textarea.value !== lastSavedContent) {
+            const result = await window.electronAPI.newNote();
+            if (!result.confirmed) return;
+        }
+
+        // Create a new note object
+        const newNote = {
+            id:        Date.now().toString(),
+            title:     'Untitled',
+            content:   '',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        await window.electronAPI.saveNoteJson(newNote);
+        notes.unshift(newNote);         // add to the top of the list
+        currentNoteId        = newNote.id;
+        titleInput.value     = '';
+        textarea.value       = '';
+        lastSavedContent     = '';
+        renderNotesList();
+        titleInput.focus();             // move cursor to title field
+        statusEl.textContent = 'New note created.';
+    });
+
+    // UPDATED: Save button
+    saveBtn.addEventListener('click', async () => {
+        await saveCurrentNote();
+    });
+
     saveAsBtn.addEventListener('click',   exportNote);
     openFileBtn.addEventListener('click', importFile);
 
-    textarea.addEventListener('input',   markDirty);
-    titleInput.addEventListener('input', markDirty);
+    // UPDATED: Auto-save with debounce
+    textarea.addEventListener('input', () => {
+        statusEl.textContent = 'Unsaved changes...';
+        statusEl.style.color = 'gray';
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(saveCurrentNote, 5000);
+    });
 
-    window.electronAPI.onMenuAction('menu-new-note',  () => createNewNote());
-    window.electronAPI.onMenuAction('menu-open-file', () => importFile());
-    window.electronAPI.onMenuAction('menu-save',      () => saveCurrentNote());
-    window.electronAPI.onMenuAction('menu-save-as',   () => exportNote());
+    // Also auto-save when title changes
+    titleInput.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(saveCurrentNote, 5000);
+    });
 
-    // ── Init (single path) ────────────────────────────────────────────────────
+    // NEW: Menu action listeners
+    window.electronAPI.onMenuAction('menu-new-note',  () => newNoteBtn.click());
+    window.electronAPI.onMenuAction('menu-open-file', () => openFileBtn.click());
+    window.electronAPI.onMenuAction('menu-save',      () => saveBtn.click());
+    window.electronAPI.onMenuAction('menu-save-as',   () => saveAsBtn.click());
 
-    try {
-        notes = await window.electronAPI.getNotes();
-        console.log('[init] loaded', notes.length, 'notes');
-    } catch (err) {
-        notes = [];
-        console.error('[init] getNotes failed:', err);
-    }
+    // ── Init ──────────────────────────────────────────────────────────────────
+
+    // UPDATED: Load all notes on startup
+    notes = await window.electronAPI.getNotes();
 
     if (notes.length > 0) {
-        await switchNote(notes[0].id);
+        // Open the most recently updated note
+        const mostRecent = notes.reduce((a, b) =>
+            new Date(a.updatedAt) > new Date(b.updatedAt) ? a : b
+        );
+        await switchNote(mostRecent.id);
     } else {
-        renderNotesList();
+        // No notes yet – trigger New Note automatically
+        newNoteBtn.click();
     }
+
+    renderNotesList();
 });
